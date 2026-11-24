@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>回転の合成と「角度の合成」3Dシミュレーター</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js r128 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Inter & Noto Sans JP Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans JP', sans-serif;
+    }
+    .font-mono-math {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Custom range slider styling */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: #334155;
+      height: 6px;
+      border-radius: 9999px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #38bdf8;
+      cursor: pointer;
+      border: 2px solid #0f172a;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #38bdf8;
+      cursor: pointer;
+      border: 2px solid #0f172a;
+    }
+    #canvas-container canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col overflow-x-hidden">
+
+  <!-- Header -->
+  <header class="bg-slate-900/90 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-2 sticky top-0 z-20 backdrop-blur">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/20 font-bold text-white text-sm">
+        3D
+      </div>
+      <div>
+        <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">
+          回転の合成と「角度の合成」シミュレーター
+        </h1>
+        <p class="text-xs text-slate-400">
+          右手系・能動回転・列ベクトル・四元数 (w, x, y, z) 準拠
+        </p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 text-xs">
+      <button id="btn-help" class="px-3 py-1.5 rounded-lg bg-sky-600/20 hover:bg-sky-600/40 text-sky-300 border border-sky-500/40 font-semibold transition">
+        ？ 使い方
+      </button>
+      <button id="btn-reset-cam" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition">
+        視点リセット
+      </button>
+      <button id="btn-toggle-ghost" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 transition">
+        初期姿勢枠: ON
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="flex-1 flex flex-col lg:flex-row min-h-0">
+
+    <!-- Left / Center: 3D Canvas & Playback Bar -->
+    <section class="flex-1 flex flex-col min-h-[420px] lg:min-h-[calc(100vh-61px)] relative bg-slate-950">
+
+      <!-- 3D Viewport Container -->
+      <div id="canvas-container" class="relative flex-1 w-full min-h-[340px] cursor-grab active:cursor-grabbing">
+        <!-- Top-Left Floating Legend -->
+        <div class="absolute top-3 left-3 z-10 pointer-events-none flex flex-col gap-1.5">
+          <div class="bg-slate-900/80 backdrop-blur-md border border-slate-700/80 rounded-xl px-3 py-2 text-xs shadow-lg">
+            <div class="font-semibold text-slate-200 mb-1">座標軸と表示ガイド</div>
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>物体 x'</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>物体 y'</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block"></span>物体 z'</span>
+              <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block"></span>合成回転軸 n</span>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-1">
+              ドラッグで視点回転 / スクロールで拡大縮小
+            </div>
+          </div>
+
+          <!-- Active Phase Indicator Badge -->
+          <div id="phase-badge" class="bg-indigo-950/85 backdrop-blur-md border border-indigo-500/50 rounded-xl px-3 py-1.5 text-xs text-indigo-200 shadow-lg w-fit">
+            待機中: 再生ボタンまたはスライダーで確認
+          </div>
+        </div>
+
+        <!-- Top-Right Quick Summary of the 3 Angles -->
+        <div class="absolute top-3 right-3 z-10 pointer-events-none hidden sm:block">
+          <div class="bg-slate-900/85 backdrop-blur-md border border-slate-700/80 rounded-xl p-3 shadow-lg w-60">
+            <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-2">3つの「角度」の比較</div>
+            <div class="space-y-1.5 text-xs">
+              <div class="flex justify-between items-center">
+                <span class="text-slate-300">① 操作角の和</span>
+                <span id="hud-op-sum" class="font-mono-math font-bold text-slate-200">180.0°</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-amber-300 font-medium">② 合成主回転角 θ</span>
+                <span id="hud-principal" class="font-mono-math font-bold text-amber-400 text-sm">120.0°</span>
+              </div>
+              <div class="border-t border-slate-800 pt-1.5 mt-1">
+                <div class="text-[11px] text-slate-400 mb-1">③ 各軸ベクトルの変化角</div>
+                <div class="grid grid-cols-3 gap-1 text-center font-mono-math text-[11px]">
+                  <div class="bg-rose-950/60 border border-rose-500/30 rounded px-1 py-0.5 text-rose-300">
+                    x': <span id="hud-vx">90°</span>
+                  </div>
+                  <div class="bg-emerald-950/60 border border-emerald-500/30 rounded px-1 py-0.5 text-emerald-300">
+                    y': <span id="hud-vy">90°</span>
+                  </div>
+                  <div class="bg-sky-950/60 border border-sky-500/30 rounded px-1 py-0.5 text-sky-300">
+                    z': <span id="hud-vz">90°</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Playback & Mode Comparison Bar -->
+      <div class="bg-slate-900 border-t border-slate-800 p-3 sm:p-4 space-y-3">
+        <!-- Playback Mode Selector -->
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800">
+            <button id="mode-steps" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition bg-sky-600 text-white shadow">
+              ①→② 2段階で回す (操作経路)
+            </button>
+            <button id="mode-single" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition text-slate-400 hover:text-white">
+              合成軸 n で1回だけ回す (等価回転)
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="btn-play" class="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/20">
+              <span id="play-icon">▶</span>
+              <span id="play-label">再生</span>
+            </button>
+            <button id="btn-replay" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-medium border border-slate-700 transition">
+              最初から
+            </button>
+          </div>
+        </div>
+
+        <!-- Scrubber Slider -->
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-slate-400 whitespace-nowrap w-14">進行度</span>
+          <input id="timeline-slider" type="range" min="0" max="100" value="100" step="0.5" class="flex-1" />
+          <span id="timeline-pct" class="font-mono-math text-xs text-sky-400 w-12 text-right">100%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Sidebar: Controls, Presets & Math Inspector -->
+    <aside class="w-full lg:w-[440px] xl:w-[470px] bg-slate-900/70 border-t lg:border-t-0 lg:border-l border-slate-800 overflow-y-auto lg:h-[calc(100vh-61px)] p-4 space-y-4">
+
+      <!-- Guided 3-Step Walkthrough -->
+      <div class="bg-gradient-to-br from-sky-950/70 to-indigo-950/60 border border-sky-500/40 rounded-2xl p-3.5 space-y-3 shadow-lg">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold text-sky-200">まずはここから！3ステップ体験</h2>
+          <span class="text-[11px] text-sky-300/80">ボタンを押すだけ</span>
+        </div>
+
+        <!-- Step 1 -->
+        <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 space-y-2">
+          <div class="text-xs font-bold text-white">① 「90°＋90°＝120°」を自分の目で見る</div>
+          <p class="text-[11px] text-slate-300 leading-relaxed">
+            Xに90°→Yに90°と「2回」回した最終姿勢は、黄色い斜め軸 <span class="text-amber-300 font-bold">n</span> で「1回だけ120°」回した姿勢とピタリと一致します。
+          </p>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button id="tour-step1-steps" class="py-1.5 px-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold transition">
+              ▶ 2回で回す (90°→90°)
+            </button>
+            <button id="tour-step1-single" class="py-1.5 px-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-semibold transition">
+              ▶ 1回で回す (斜め120°)
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 space-y-2">
+          <div class="text-xs font-bold text-white">② 順番を逆にしても120°、でも向きは別！</div>
+          <p class="text-[11px] text-slate-300 leading-relaxed">
+            Y→X に逆順にしても主回転角は同じ120°ですが、黄色い軸の向きが変わりスマホは別の姿勢になります。
+          </p>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button id="tour-step2-xy" class="py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 text-[11px] font-semibold transition">
+              ▶ X90° → Y90°
+            </button>
+            <button id="tour-step2-yx" class="py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 text-[11px] font-semibold transition">
+              ▶ Y90° → X90°
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-2.5 space-y-2">
+          <div class="text-xs font-bold text-white">③ 同じ軸なら足せる＆動かない矢印を見る</div>
+          <p class="text-[11px] text-slate-300 leading-relaxed">
+            同じZ軸なら 30°＋45°＝75° になります。このとき青い矢印 <span class="text-sky-300 font-bold">z'</span> は回転軸と平行なので 0°（全く動かない）点に注目してください。
+          </p>
+          <button id="tour-step3-samez" class="w-full py-1.5 px-2 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white text-[11px] font-semibold transition">
+            ▶ 同じZ軸で 30°→45° を再生
+          </button>
+        </div>
+      </div>
+
+      <!-- Presets from the PDF -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold text-white">資料の実験プリセット</h2>
+          <span class="text-[11px] text-slate-400">クリックで再現</span>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <button data-preset="xy90" class="preset-btn text-left p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-sky-500/50 transition">
+            <div class="font-semibold text-sky-300">X90° → Y90° (基本)</div>
+            <div class="text-[11px] text-slate-400">和180° → 主回転角120°</div>
+          </button>
+          <button data-preset="yx90" class="preset-btn text-left p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition">
+            <div class="font-semibold text-indigo-300">Y90° → X90° (逆順)</div>
+            <div class="text-[11px] text-slate-400">角は同じ120°、軸が変化</div>
+          </button>
+          <button data-preset="sameZ" class="preset-btn text-left p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition">
+            <div class="font-semibold text-emerald-300">Z30° → Z45° (同軸)</div>
+            <div class="text-[11px] text-slate-400">同じ軸なら加算で75°</div>
+          </button>
+          <button data-preset="z270" class="preset-btn text-left p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition">
+            <div class="font-semibold text-amber-300">Z180° → Z90° (270°)</div>
+            <div class="text-[11px] text-slate-400">操作270° → 主回転角90°</div>
+          </button>
+          <button data-preset="cancelZ" class="preset-btn text-left p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition">
+            <div class="font-semibold text-rose-300">Z90° → Z-90° (相殺)</div>
+            <div class="text-[11px] text-slate-400">逆向き回転で0°に戻る</div>
+          </button>
+          <button data-preset="localXY" class="preset-btn text-left p-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 transition">
+            <div class="font-semibold text-purple-300">物体軸: x'90° → y'90°</div>
+            <div class="text-[11px] text-slate-400">固定軸との違いを比較</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Rotation Configuration -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-sm font-bold text-white">回転操作の設定</h2>
+          <button id="btn-swap" class="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 text-xs font-medium transition">
+            Q₁ ⇄ Q₂ 順序入替
+          </button>
+        </div>
+
+        <!-- Fixed vs Local Axes Toggle -->
+        <div class="bg-slate-950 rounded-xl p-2 border border-slate-800">
+          <div class="flex items-center justify-between text-xs mb-1.5 px-1">
+            <span class="text-slate-400">第2回転の基準軸 (第9章)</span>
+            <span id="frame-formula" class="font-mono-math text-sky-400 font-semibold">q = q₂ q₁ (左掛け)</span>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button id="frame-fixed" class="py-1.5 rounded-lg text-xs font-semibold bg-sky-600 text-white transition">
+              固定軸 (空間に固定)
+            </button>
+            <button id="frame-local" class="py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-400 hover:text-white transition">
+              物体軸 (一緒に動く)
+            </button>
+          </div>
+        </div>
+
+        <!-- Rotation 1 (Q1) -->
+        <div class="bg-slate-950/70 rounded-xl p-3 border border-slate-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-sky-300">① 第1回転 Q₁</span>
+            <span id="q1-angle-val" class="font-mono-math text-sm font-bold text-white">+90°</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[11px] text-slate-400 mr-1">軸:</span>
+            <button data-rot="1" data-axis="X" class="axis-btn-1 flex-1 py-1 rounded-lg text-xs font-bold bg-rose-600 text-white">X</button>
+            <button data-rot="1" data-axis="Y" class="axis-btn-1 flex-1 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700">Y</button>
+            <button data-rot="1" data-axis="Z" class="axis-btn-1 flex-1 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700">Z</button>
+            <button data-rot="1" data-axis="XY" class="axis-btn-1 flex-1 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700">斜め(1,1,0)</button>
+          </div>
+          <input id="q1-slider" type="range" min="-180" max="180" step="5" value="90" class="w-full" />
+        </div>
+
+        <!-- Rotation 2 (Q2) -->
+        <div class="bg-slate-950/70 rounded-xl p-3 border border-slate-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-emerald-300">② 第2回転 Q₂</span>
+            <span id="q2-angle-val" class="font-mono-math text-sm font-bold text-white">+90°</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[11px] text-slate-400 mr-1">軸:</span>
+            <button data-rot="2" data-axis="X" class="axis-btn-2 flex-1 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700">X</button>
+            <button data-rot="2" data-axis="Y" class="axis-btn-2 flex-1 py-1 rounded-lg text-xs font-bold bg-emerald-600 text-white">Y</button>
+            <button data-rot="2" data-axis="Z" class="axis-btn-2 flex-1 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700">Z</button>
+            <button data-rot="2" data-axis="XY" class="axis-btn-2 flex-1 py-1 rounded-lg text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700">斜め(1,1,0)</button>
+          </div>
+          <input id="q2-slider" type="range" min="-180" max="180" step="5" value="90" class="w-full" />
+        </div>
+      </div>
+
+      <!-- Detailed 3 Angles Comparison (Mobile + Desktop) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+        <h2 class="text-sm font-bold text-white">3種類の「角度」と解説</h2>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
+            <div class="text-[11px] text-slate-400">① 操作角の単純和</div>
+            <div id="card-op-sum" class="font-mono-math text-lg font-bold text-slate-200 mt-0.5">180.0°</div>
+            <div id="card-op-detail" class="text-[11px] text-slate-500 font-mono-math">|90°| + |90°|</div>
+          </div>
+          <div class="bg-amber-950/30 border border-amber-500/40 rounded-xl p-2.5">
+            <div class="text-[11px] text-amber-300">② 合成回転の主回転角</div>
+            <div id="card-principal" class="font-mono-math text-lg font-bold text-amber-400 mt-0.5">120.0°</div>
+            <div id="card-axis" class="text-[11px] text-amber-200/80 font-mono-math">n=(0.58, 0.58, -0.58)</div>
+          </div>
+        </div>
+
+        <!-- ③ Vector Movement Angles -->
+        <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5 space-y-1.5">
+          <div class="text-[11px] text-slate-400">③ 物体に固定した各矢印の向きの変化角 (初期→最終)</div>
+          <div class="space-y-1.5 text-xs font-mono-math">
+            <div class="flex items-center justify-between">
+              <span class="text-rose-400">x' 軸: <span id="vec-x-dir" class="text-slate-300">(0.00, 0.00, -1.00)</span></span>
+              <span id="vec-x-ang" class="font-bold text-rose-300">90.0°</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-emerald-400">y' 軸: <span id="vec-y-dir" class="text-slate-300">(1.00, 0.00, 0.00)</span></span>
+              <span id="vec-y-ang" class="font-bold text-emerald-300">90.0°</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sky-400">z' 軸: <span id="vec-z-dir" class="text-slate-300">(0.00, -1.00, 0.00)</span></span>
+              <span id="vec-z-ang" class="font-bold text-sky-300">90.0°</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dynamic Insight Box -->
+        <div id="insight-box" class="bg-sky-950/40 border border-sky-500/30 rounded-xl p-2.5 text-xs text-sky-200 leading-relaxed">
+          X軸とY軸は直交しているため、内積が0になり合成四元数の実部は 0.500 です。その結果、2回の90°操作は斜めの軸 n まわりの 120° 回転と等価になります。
+        </div>
+      </div>
+
+      <!-- Quaternion & Rotation Matrix Verification Panel -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+        <h2 class="text-sm font-bold text-white">四元数 & 回転行列による検算</h2>
+
+        <!-- Quaternions -->
+        <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5 space-y-1.5 font-mono-math text-[11px]">
+          <div class="flex justify-between text-slate-400">
+            <span>q₁ = (w, x, y, z)</span>
+            <span id="math-q1" class="text-sky-300">(0.707, 0.707, 0.000, 0.000)</span>
+          </div>
+          <div class="flex justify-between text-slate-400">
+            <span>q₂ = (w, x, y, z)</span>
+            <span id="math-q2" class="text-emerald-300">(0.707, 0.000, 0.707, 0.000)</span>
+          </div>
+          <div class="border-t border-slate-800 pt-1.5 flex justify-between font-semibold">
+            <span id="math-qtot-label" class="text-amber-300">q₂q₁</span>
+            <span id="math-qtot" class="text-amber-300">(0.500, 0.500, 0.500, -0.500)</span>
+          </div>
+          <div class="pt-1 text-[11px] text-slate-400 space-y-0.5">
+            <div id="math-w-breakdown">w = w₂w₁ - u₂·u₁ = 0.500 - 0.000 = 0.500</div>
+            <div id="math-acos-breakdown">θ = 2 arccos(|0.500|) = 120.0°</div>
+          </div>
+        </div>
+
+        <!-- 3x3 Rotation Matrix & Trace Check -->
+        <div class="bg-slate-950 border border-slate-800 rounded-xl p-2.5 space-y-2">
+          <div class="flex items-center justify-between text-xs">
+            <span class="text-slate-400 font-semibold">合成回転行列 R (列が x', y', z')</span>
+            <span id="math-trace" class="font-mono-math text-[11px] text-indigo-300">tr(R) = 0.000</span>
+          </div>
+          <div id="math-matrix" class="grid grid-cols-3 gap-1 font-mono-math text-xs text-center bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+            <!-- Populated by JS -->
+          </div>
+          <div id="math-trace-check" class="font-mono-math text-[11px] text-slate-400">
+            tr(R) = 1 + 2cosθ ⇒ cosθ = -0.500 ⇒ θ = 120.0°
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- Help Modal (No alert/confirm) -->
+  <div id="help-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-white">シミュレーターの使い方</h3>
+        <button id="btn-close-help" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition">✕</button>
+      </div>
+      <ul class="space-y-2.5 text-xs text-slate-300 leading-relaxed">
+        <li>
+          <span class="font-bold text-sky-300">1. 3D画面を動かす：</span>
+          画面をドラッグすると視点をぐるぐる回せます。ホイールで拡大・縮小できます。
+        </li>
+        <li>
+          <span class="font-bold text-amber-300">2. 画面下の再生バー：</span>
+          「①→② 2段階で回す」と「合成軸 n で1回だけ回す」を切り替えると、2つの回転が1つの斜め軸回転と同じ姿勢にたどり着くことが見比べられます。
+        </li>
+        <li>
+          <span class="font-bold text-emerald-300">3. まずは右上の「3ステップ体験」：</span>
+          青いボタンを押すだけで、資料の重要実験が自動で再生されます。
+        </li>
+        <li>
+          <span class="font-bold text-indigo-300">4. 自由に実験する：</span>
+          右側のスライダーで角度を変えたり、「Q₁ ⇄ Q₂ 順序入替」や「固定軸 / 物体軸」を切り替えて、下の四元数・回転行列の変化を確認できます。
+        </li>
+      </ul>
+      <button id="btn-close-help-ok" class="w-full py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold transition">
+        わかった！実験を始める
+      </button>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * ============================================================================
+     * 1. QUATERNION & 3D ROTATION MATH ENGINE
+     *    Conventions strictly matching the PDF:
+     *    - Right-handed coordinate system
+     *    - Active rotation, column vectors
+     *    - Quaternion order: (w, x, y, z)
+     *    - Fixed axes: q_total = q2 * q1
+     *    - Local (body) axes: q_total = q1 * q2
+     * ============================================================================
+     */
+
+    const DEG2RAD = Math.PI / 180;
+    const RAD2DEG = 180 / Math.PI;
+
+    function clamp(val, min, max) {
+      return Math.max(min, Math.min(max, val));
+    }
+
+    function normalizeVec(v) {
+      const len = Math.hypot(v[0], v[1], v[2]);
+      if (len < 1e-9) return [0, 0, 1];
+      return [v[0] / len, v[1] / len, v[2] / len];
+    }
+
+    function dotVec(a, b) {
+      return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    }
+
+    function axisKeyToVec(key) {
+      switch (key) {
+        case 'X': return [1, 0, 0];
+        case 'Y': return [0, 1, 0];
+        case 'Z': return [0, 0, 1];
+        case 'XY': return normalizeVec([1, 1, 0]);
+        default: return [1, 0, 0];
+      }
+    }
+
+    // Create unit quaternion {w, x, y, z} from axis vector and angle in degrees
+    function quatFromAxisAngle(axisVec, angleDeg) {
+      const n = normalizeVec(axisVec);
+      const half = (angleDeg * DEG2RAD) / 2;
+      const s = Math.sin(half);
+      return {
+        w: Math.cos(half),
+        x: n[0] * s,
+        y: n[1] * s,
+        z: n[2] * s
+      };
+    }
+
+    // Normalize quaternion
+    function quatNormalize(q) {
+      const norm = Math.hypot(q.w, q.x, q.y, q.z);
+      if (norm < 1e-9) return { w: 1, x: 0, y: 0, z: 0 };
+      return { w: q.w / norm, x: q.x / norm, y: q.y / norm, z: q.z / norm };
+    }
+
+    // Hamilton product a * b
+    function quatMul(a, b) {
+      return quatNormalize({
+        w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+        x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w
+      });
+    }
+
+    // Rotate 3D vector v by unit quaternion q (active rotation: q * v * q*)
+    function quatRotateVec(q, v) {
+      const qv = { w: 0, x: v[0], y: v[1], z: v[2] };
+      const qConj = { w: q.w, x: -q.x, y: -q.y, z: -q.z };
+      const tmp = quatMul(q, qv);
+      const res = {
+        x: tmp.w * qConj.x + tmp.x * qConj.w + tmp.y * qConj.z - tmp.z * qConj.y,
+        y: tmp.w * qConj.y - tmp.x * qConj.z + tmp.y * qConj.w + tmp.z * qConj.x,
+        z: tmp.w * qConj.z + tmp.x * qConj.y - tmp.y * qConj.x + tmp.z * qConj.w
+      };
+      return [res.x, res.y, res.z];
+    }
+
+    // Convert unit quaternion to 3x3 rotation matrix (row-major array of 9 numbers)
+    function quatToMatrix3(q) {
+      const { w, x, y, z } = q;
+      return [
+        1 - 2 * (y * y + z * z), 2 * (x * y - z * w),     2 * (x * z + y * w),
+        2 * (x * y + z * w),     1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+        2 * (x * z - y * w),     2 * (y * z + x * w),     1 - 2 * (x * x + y * y)
+      ];
+    }
+
+    // Extract principal angle (0..180 deg) and unit rotation axis (with canonical w >= 0)
+    function quatToPrincipalAxisAngle(q) {
+      let c = { ...q };
+      if (c.w < 0) {
+        c = { w: -c.w, x: -c.x, y: -c.y, z: -c.z };
+      }
+      const wClamped = clamp(c.w, -1, 1);
+      const angleRad = 2 * Math.acos(wClamped);
+      const angleDeg = angleRad * RAD2DEG;
+      const sinHalf = Math.hypot(c.x, c.y, c.z);
+
+      let axis = [0, 0, 1];
+      let hasAxis = false;
+      if (sinHalf > 1e-5) {
+        axis = [c.x / sinHalf, c.y / sinHalf, c.z / sinHalf];
+        hasAxis = true;
+      }
+      return { angleDeg, axis, hasAxis, canonicalQ: c };
+    }
+
+    function angleBetweenVecsDeg(v1, v2) {
+      const d = clamp(dotVec(normalizeVec(v1), normalizeVec(v2)), -1, 1);
+      return Math.acos(d) * RAD2DEG;
+    }
+
+    function fmt(n, digits = 3) {
+      const clean = Math.abs(n) < 1e-4 ? 0 : n;
+      return clean.toFixed(digits);
+    }
+
+    /**
+     * ============================================================================
+     * 2. APPLICATION STATE
+     * ============================================================================
+     */
+    const state = {
+      axis1: 'X',
+      angle1: 90,
+      axis2: 'Y',
+      angle2: 90,
+      frame: 'fixed',      // 'fixed' (q2*q1) or 'local' (q1*q2)
+      playMode: 'steps',   // 'steps' (Q1 -> Q2) or 'single' (equivalent rotation around n)
+      progress: 1.0,       // 0.0 to 1.0
+      isPlaying: false,
+      showGhost: true,
+      // Computed values
+      q1: null,
+      q2: null,
+      qTotal: null,
+      principal: null
+    };
+
+    /**
+     * ============================================================================
+     * 3. THREE.JS 3D SCENE SETUP (Z-UP RIGHT-HANDED COORDINATE SYSTEM)
+     * ============================================================================
+     */
+    let scene, camera, renderer;
+    let objectGroup, ghostGroup;
+    let compositeAxisGroup, activeAxisGroup, arcMesh;
+
+    // Camera spherical orbit coordinates (Z-up)
+    const camOrbit = {
+      theta: Math.PI / 4,      // azimuth in XY plane
+      phi: Math.PI / 3.2,      // polar angle from +Z
+      radius: 6.2,
+      isDragging: false,
+      prevX: 0,
+      prevY: 0
+    };
+
+    function createTextSprite(text, colorHex, scale = 0.55) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 384;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.font = 'bold 48px Inter, "Noto Sans JP", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = colorHex;
+      ctx.fillText(text, 192, 64);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const material = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+      const sprite = new THREE.Sprite(material);
+      sprite.scale.set(scale * 3, scale, 1);
+      return sprite;
+    }
+
+    // Build a thick colored arrow from origin along a direction
+    function createArrow(dirVec, length, color, headLength = 0.28, headRadius = 0.09, shaftRadius = 0.032) {
+      const group = new THREE.Group();
+      const dir = new THREE.Vector3(...dirVec).normalize();
+
+      const shaftLen = Math.max(0.01, length - headLength);
+      const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLen, 16);
+      const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.15 });
+      const shaft = new THREE.Mesh(shaftGeo, mat);
+      shaft.position.y = shaftLen / 2;
+      group.add(shaft);
+
+      const headGeo = new THREE.ConeGeometry(headRadius, headLength, 20);
+      const head = new THREE.Mesh(headGeo, mat);
+      head.position.y = shaftLen + headLength / 2;
+      group.add(head);
+
+      // Align default +Y arrow to target direction
+      const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      group.quaternion.copy(quat);
+      return group;
+    }
+
+    // Build an asymmetric 3D "Smartphone / Book" model with clear face labels
+    function createSmartphoneMesh() {
+      const group = new THREE.Group();
+
+      // Main body: wider along Y, longer along X, thin along Z
+      // Makes roll, pitch, and yaw immediately distinguishable!
+      const bodyGeo = new THREE.BoxGeometry(1.5, 0.95, 0.22);
+      const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b,
+        roughness: 0.3,
+        metalness: 0.4
+      });
+      const body = new THREE.Mesh(bodyGeo, bodyMat);
+      group.add(body);
+
+      // Screen on +Z face (top surface)
+      const screenCanvas = document.createElement('canvas');
+      screenCanvas.width = 512;
+      screenCanvas.height = 320;
+      const ctx = screenCanvas.getContext('2d');
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, 512, 320);
+
+      // Decorative grid & arrow pointing to +X (top of phone/book)
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 6;
+      ctx.strokeRect(12, 12, 488, 296);
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 46px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('TOP (+Z)', 256, 110);
+
+      ctx.fillStyle = '#fb7185';
+      ctx.font = 'bold 38px Inter, sans-serif';
+      ctx.fillText('FRONT +X  →', 280, 210);
+
+      // Camera notch on +X edge
+      ctx.fillStyle = '#f43f5e';
+      ctx.beginPath();
+      ctx.arc(460, 160, 18, 0, Math.PI * 2);
+      ctx.fill();
+
+      const screenTex = new THREE.CanvasTexture(screenCanvas);
+      const screenGeo = new THREE.PlaneGeometry(1.36, 0.82);
+      const screenMat = new THREE.MeshBasicMaterial({ map: screenTex });
+      const screen = new THREE.Mesh(screenGeo, screenMat);
+      screen.position.z = 0.115;
+      group.add(screen);
+
+      // Back face (-Z) indicator
+      const backCanvas = document.createElement('canvas');
+      backCanvas.width = 512;
+      backCanvas.height = 320;
+      const bctx = backCanvas.getContext('2d');
+      bctx.fillStyle = '#334155';
+      bctx.fillRect(0, 0, 512, 320);
+      bctx.fillStyle = '#94a3b8';
+      bctx.font = 'bold 46px Inter, sans-serif';
+      bctx.textAlign = 'center';
+      bctx.fillText('BACK (-Z)', 256, 175);
+      const backTex = new THREE.CanvasTexture(backCanvas);
+      const backPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.36, 0.82),
+        new THREE.MeshBasicMaterial({ map: backTex })
+      );
+      backPlane.position.z = -0.115;
+      backPlane.rotation.y = Math.PI;
+      group.add(backPlane);
+
+      // Subtle wireframe edge highlight
+      const edges = new THREE.EdgesGeometry(bodyGeo);
+      const line = new THREE.LineSegments(
+        edges,
+        new THREE.LineBasicMaterial({ color: 0x64748b })
+      );
+      group.add(line);
+
+      // Local object axes (x' red, y' green, z' blue)
+      group.add(createArrow([1, 0, 0], 1.75, 0xf43f5e));
+      group.add(createArrow([0, 1, 0], 1.75, 0x10b981));
+      group.add(createArrow([0, 0, 1], 1.75, 0x38bdf8));
+
+      const lx = createTextSprite("x'", '#fb7185', 0.45);
+      lx.position.set(1.98, 0, 0);
+      group.add(lx);
+
+      const ly = createTextSprite("y'", '#34d399', 0.45);
+      ly.position.set(0, 1.98, 0);
+      group.add(ly);
+
+      const lz = createTextSprite("z'", '#38bdf8', 0.45);
+      lz.position.set(0, 0, 1.98);
+      group.add(lz);
+
+      return group;
+    }
+
+    function initThree() {
+      const container = document.getElementById('canvas-container');
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x020617);
+
+      // Z-up right-handed camera matching the PDF diagrams
+      camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 100);
+      camera.up.set(0, 0, 1);
+      updateCameraPosition();
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      container.appendChild(renderer.domElement);
+
+      // Lighting
+      const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+      scene.add(ambient);
+
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
+      dirLight1.position.set(5, 6, 8);
+      scene.add(dirLight1);
+
+      const dirLight2 = new THREE.DirectionalLight(0x38bdf8, 0.35);
+      dirLight2.position.set(-5, -4, -3);
+      scene.add(dirLight2);
+
+      // Subtle XY reference grid (lying on Z = -1.6 plane for depth perception)
+      const gridHelper = new THREE.GridHelper(6, 12, 0x1e293b, 0x0f172a);
+      gridHelper.rotation.x = Math.PI / 2; // rotate to XY plane in Z-up
+      gridHelper.position.z = -1.7;
+      scene.add(gridHelper);
+
+      // Fixed Coordinate System Axes (subtle translucent lines + labels)
+      const fixedLen = 2.65;
+      const createFixedLine = (dir, color, label) => {
+        const pts = [
+          new THREE.Vector3(-dir[0] * fixedLen * 0.45, -dir[1] * fixedLen * 0.45, -dir[2] * fixedLen * 0.45),
+          new THREE.Vector3(dir[0] * fixedLen, dir[1] * fixedLen, dir[2] * fixedLen)
+        ];
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineDashedMaterial({
+          color,
+          dashSize: 0.12,
+          gapSize: 0.08,
+          transparent: true,
+          opacity: 0.55
+        });
+        const line = new THREE.Line(geo, mat);
+        line.computeLineDistances();
+        scene.add(line);
+
+        const lbl = createTextSprite(label, '#' + color.toString(16).padStart(6, '0'), 0.42);
+        lbl.position.set(dir[0] * (fixedLen + 0.25), dir[1] * (fixedLen + 0.25), dir[2] * (fixedLen + 0.25));
+        scene.add(lbl);
+      };
+
+      createFixedLine([1, 0, 0], 0x9f1239, '固定X');
+      createFixedLine([0, 1, 0], 0x065f46, '固定Y');
+      createFixedLine([0, 0, 1], 0x075985, '固定Z');
+
+      // Ghost Initial Pose Wireframe
+      ghostGroup = new THREE.Group();
+      const ghostGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.5, 0.95, 0.22));
+      const ghostLine = new THREE.LineSegments(
+        ghostGeo,
+        new THREE.LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.45 })
+      );
+      ghostGroup.add(ghostLine);
+      scene.add(ghostGroup);
+
+      // Rotating 3D Object
+      objectGroup = createSmartphoneMesh();
+      scene.add(objectGroup);
+
+      // Composite Rotation Axis (Amber glowing rod + cone + angle arc)
+      compositeAxisGroup = new THREE.Group();
+      scene.add(compositeAxisGroup);
+
+      // Active Step Rotation Axis highlight (Cyan/Emerald ring during Q1/Q2)
+      activeAxisGroup = new THREE.Group();
+      scene.add(activeAxisGroup);
+
+      setupOrbitControls(renderer.domElement);
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function updateCameraPosition() {
+      const sinPhi = Math.sin(camOrbit.phi);
+      camera.position.set(
+        camOrbit.radius * sinPhi * Math.cos(camOrbit.theta),
+        camOrbit.radius * sinPhi * Math.sin(camOrbit.theta),
+        camOrbit.radius * Math.cos(camOrbit.phi)
+      );
+      camera.lookAt(0, 0, 0);
+    }
+
+    function setupOrbitControls(domEl) {
+      const onPointerDown = (x, y) => {
+        camOrbit.isDragging = true;
+        camOrbit.prevX = x;
+        camOrbit.prevY = y;
+      };
+      const onPointerMove = (x, y) => {
+        if (!camOrbit.isDragging) return;
+        const dx = x - camOrbit.prevX;
+        const dy = y - camOrbit.prevY;
+        camOrbit.prevX = x;
+        camOrbit.prevY = y;
+
+        camOrbit.theta -= dx * 0.008;
+        camOrbit.phi = clamp(camOrbit.phi - dy * 0.008, 0.15, Math.PI - 0.15);
+        updateCameraPosition();
+      };
+      const onPointerUp = () => {
+        camOrbit.isDragging = false;
+      };
+
+      // Mouse events
+      domEl.addEventListener('mousedown', (e) => onPointerDown(e.clientX, e.clientY));
+      window.addEventListener('mousemove', (e) => onPointerMove(e.clientX, e.clientY));
+      window.addEventListener('mouseup', onPointerUp);
+
+      // Wheel zoom
+      domEl.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        camOrbit.radius = clamp(camOrbit.radius + e.deltaY * 0.004, 3.2, 12.0);
+        updateCameraPosition();
+      }, { passive: false });
+
+      // Touch events
+      domEl.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          onPointerDown(e.touches[0].clientX, e.touches[0].clientY);
+        }
+      }, { passive: true });
+      domEl.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1) {
+          onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+        }
+      }, { passive: true });
+      domEl.addEventListener('touchend', onPointerUp);
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      if (!container || !renderer || !camera) return;
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    /**
+     * ============================================================================
+     * 4. VISUALIZING THE COMPOSITE AXIS & ROTATION ARC
+     * ============================================================================
+     */
+    function rebuildCompositeAxisVisual() {
+      // Clear previous meshes
+      while (compositeAxisGroup.children.length > 0) {
+        compositeAxisGroup.remove(compositeAxisGroup.children[0]);
+      }
+
+      const { angleDeg, axis, hasAxis } = state.principal;
+      if (!hasAxis || angleDeg < 0.5) return;
+
+      const dir = new THREE.Vector3(...axis).normalize();
+
+      // Rod passing through origin (-2.2 to +2.4)
+      const rodGeo = new THREE.CylinderGeometry(0.028, 0.028, 4.4, 16);
+      const rodMat = new THREE.MeshStandardMaterial({
+        color: 0xfbbf24,
+        emissive: 0xb45309,
+        emissiveIntensity: 0.45,
+        roughness: 0.3
+      });
+      const rod = new THREE.Mesh(rodGeo, rodMat);
+      const qAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      rod.quaternion.copy(qAlign);
+      compositeAxisGroup.add(rod);
+
+      // Arrowhead at +n end
+      const coneGeo = new THREE.ConeGeometry(0.1, 0.32, 20);
+      const cone = new THREE.Mesh(coneGeo, rodMat);
+      cone.position.copy(dir).multiplyScalar(2.35);
+      cone.quaternion.copy(qAlign);
+      compositeAxisGroup.add(cone);
+
+      // Label "n"
+      const lbl = createTextSprite('n', '#fbbf24', 0.5);
+      lbl.position.copy(dir).multiplyScalar(2.72);
+      compositeAxisGroup.add(lbl);
+
+      // Circular arc perpendicular to n showing the principal rotation angle θ
+      const arcRadius = 1.05;
+      const arcAngle = angleDeg * DEG2RAD;
+      const segments = 48;
+      const arcPts = [];
+      for (let i = 0; i <= segments; i++) {
+        const a = (i / segments) * arcAngle;
+        arcPts.push(new THREE.Vector3(Math.cos(a) * arcRadius, Math.sin(a) * arcRadius, 0));
+      }
+      const arcGeo = new THREE.BufferGeometry().setFromPoints(arcPts);
+      const arcMat = new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.9 });
+      const arcLine = new THREE.Line(arcGeo, arcMat);
+
+      // Orient arc plane perpendicular to n (local +Z aligns with n)
+      const qArc = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+      arcLine.quaternion.copy(qArc);
+      compositeAxisGroup.add(arcLine);
+
+      // Subtle translucent ring around the axis
+      const ringGeo = new THREE.RingGeometry(arcRadius - 0.02, arcRadius + 0.02, 48);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xfbbf24,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.2
+      });
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.quaternion.copy(qArc);
+      compositeAxisGroup.add(ring);
+    }
+
+    function updateActiveAxisHighlight(axisVec, colorHex) {
+      while (activeAxisGroup.children.length > 0) {
+        activeAxisGroup.remove(activeAxisGroup.children[0]);
+      }
+      if (!axisVec) return;
+
+      const dir = new THREE.Vector3(...axisVec).normalize();
+      const qAlign = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+
+      const ringGeo = new THREE.TorusGeometry(1.35, 0.018, 12, 64);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.65
+      });
+      const torus = new THREE.Mesh(ringGeo, ringMat);
+      torus.quaternion.copy(qAlign);
+      activeAxisGroup.add(torus);
+    }
+
+    /**
+     * ============================================================================
+     * 5. COMPUTE & UPDATE UI
+     * ============================================================================
+     */
+    function recomputeMath() {
+      const v1 = axisKeyToVec(state.axis1);
+      const v2 = axisKeyToVec(state.axis2);
+
+      state.q1 = quatFromAxisAngle(v1, state.angle1);
+      state.q2 = quatFromAxisAngle(v2, state.angle2);
+
+      // Fixed axes: q_total = q2 * q1 (left multiply)
+      // Local axes: q_total = q1 * q2 (right multiply)
+      state.qTotal = state.frame === 'fixed'
+        ? quatMul(state.q2, state.q1)
+        : quatMul(state.q1, state.q2);
+
+      state.principal = quatToPrincipalAxisAngle(state.qTotal);
+
+      updateMathUI();
+      rebuildCompositeAxisVisual();
+      applyPoseAtProgress(state.progress);
+    }
+
+    function updateMathUI() {
+      const { q1, q2, qTotal, principal } = state;
+
+      // 1. Operation angle sum
+      const opAbsSum = Math.abs(state.angle1) + Math.abs(state.angle2);
+      const opSignedSum = state.angle1 + state.angle2;
+      document.getElementById('hud-op-sum').textContent = `${opAbsSum.toFixed(1)}°`;
+      document.getElementById('card-op-sum').textContent = `${opAbsSum.toFixed(1)}°`;
+      document.getElementById('card-op-detail').textContent =
+        `|${state.angle1}°| + |${state.angle2}°| (符号付和: ${opSignedSum}°)`;
+
+      // 2. Principal angle & axis
+      document.getElementById('hud-principal').textContent = `${principal.angleDeg.toFixed(1)}°`;
+      document.getElementById('card-principal').textContent = `${principal.angleDeg.toFixed(1)}°`;
+      if (principal.hasAxis && principal.angleDeg > 0.05) {
+        document.getElementById('card-axis').textContent =
+          `n=(${fmt(principal.axis[0], 2)}, ${fmt(principal.axis[1], 2)}, ${fmt(principal.axis[2], 2)})`;
+      } else {
+        document.getElementById('card-axis').textContent = 'n=不定 (回転角 0°)';
+      }
+
+      // 3. Basis vector change angles (initial -> final)
+      const xFinal = quatRotateVec(qTotal, [1, 0, 0]);
+      const yFinal = quatRotateVec(qTotal, [0, 1, 0]);
+      const zFinal = quatRotateVec(qTotal, [0, 0, 1]);
+
+      const xAng = angleBetweenVecsDeg([1, 0, 0], xFinal);
+      const yAng = angleBetweenVecsDeg([0, 1, 0], yFinal);
+      const zAng = angleBetweenVecsDeg([0, 0, 1], zFinal);
+
+      document.getElementById('hud-vx').textContent = `${xAng.toFixed(0)}°`;
+      document.getElementById('hud-vy').textContent = `${yAng.toFixed(0)}°`;
+      document.getElementById('hud-vz').textContent = `${zAng.toFixed(0)}°`;
+
+      document.getElementById('vec-x-dir').textContent = `(${fmt(xFinal[0], 2)}, ${fmt(xFinal[1], 2)}, ${fmt(xFinal[2], 2)})`;
+      document.getElementById('vec-y-dir').textContent = `(${fmt(yFinal[0], 2)}, ${fmt(yFinal[1], 2)}, ${fmt(yFinal[2], 2)})`;
+      document.getElementById('vec-z-dir').textContent = `(${fmt(zFinal[0], 2)}, ${fmt(zFinal[1], 2)}, ${fmt(zFinal[2], 2)})`;
+
+      document.getElementById('vec-x-ang').textContent = `${xAng.toFixed(1)}°`;
+      document.getElementById('vec-y-ang').textContent = `${yAng.toFixed(1)}°`;
+      document.getElementById('vec-z-ang').textContent = `${zAng.toFixed(1)}°`;
+
+      // 4. Quaternions panel
+      document.getElementById('math-q1').textContent = `(${fmt(q1.w)}, ${fmt(q1.x)}, ${fmt(q1.y)}, ${fmt(q1.z)})`;
+      document.getElementById('math-q2').textContent = `(${fmt(q2.w)}, ${fmt(q2.x)}, ${fmt(q2.y)}, ${fmt(q2.z)})`;
+      document.getElementById('math-qtot-label').textContent = state.frame === 'fixed' ? 'q₂q₁ (固定軸)' : 'q₁q₂ (物体軸)';
+      document.getElementById('math-qtot').textContent = `(${fmt(qTotal.w)}, ${fmt(qTotal.x)}, ${fmt(qTotal.y)}, ${fmt(qTotal.z)})`;
+
+      const leftQ = state.frame === 'fixed' ? q2 : q1;
+      const rightQ = state.frame === 'fixed' ? q1 : q2;
+      const ww = leftQ.w * rightQ.w;
+      const uu = leftQ.x * rightQ.x + leftQ.y * rightQ.y + leftQ.z * rightQ.z;
+      document.getElementById('math-w-breakdown').textContent =
+        `w = wL·wR - uL·uR = ${fmt(ww)} - (${fmt(uu)}) = ${fmt(qTotal.w)}`;
+      document.getElementById('math-acos-breakdown').textContent =
+        `θ = 2 arccos(|${fmt(qTotal.w)}|) = ${principal.angleDeg.toFixed(1)}°`;
+
+      // 5. Rotation Matrix & Trace Check
+      const mat = quatToMatrix3(qTotal);
+      const matContainer = document.getElementById('math-matrix');
+      matContainer.innerHTML = mat.map((val, idx) => {
+        const isDiag = idx === 0 || idx === 4 || idx === 8;
+        const cls = isDiag ? 'text-indigo-300 font-bold bg-indigo-950/50 rounded py-0.5' : 'text-slate-300 py-0.5';
+        return `<div class="${cls}">${fmt(val, 2)}</div>`;
+      }).join('');
+
+      const trace = mat[0] + mat[4] + mat[8];
+      const cosTheta = clamp((trace - 1) / 2, -1, 1);
+      const thetaFromTrace = Math.acos(cosTheta) * RAD2DEG;
+      document.getElementById('math-trace').textContent = `tr(R) = ${fmt(trace)}`;
+      document.getElementById('math-trace-check').textContent =
+        `tr(R) = 1 + 2cosθ ⇒ cosθ = ${fmt(cosTheta)} ⇒ θ = ${thetaFromTrace.toFixed(1)}°`;
+
+      // 6. Dynamic Pedagogical Insight
+      updateInsightText(opAbsSum, opSignedSum, xAng, yAng, zAng);
+    }
+
+    function updateInsightText(opAbsSum, opSignedSum, xAng, yAng, zAng) {
+      const box = document.getElementById('insight-box');
+      const { angleDeg, axis } = state.principal;
+
+      if (angleDeg < 0.1) {
+        box.textContent = '合成回転の主回転角は 0° です。2つの回転が互いに打ち消し合い、初期姿勢と完全に一致しました。';
+        return;
+      }
+
+      if (state.axis1 === state.axis2) {
+        if (Math.abs(opSignedSum) > 180) {
+          box.textContent =
+            `同じ軸まわりの回転なので操作角の和は ${opSignedSum}° ですが、主回転角は常に 0°〜180° の最短経路で表すため、逆向きの軸まわりの ${angleDeg.toFixed(1)}° になります。`;
+        } else {
+          box.textContent =
+            `同じ固定軸まわりの回転なので、円周上の移動と同じく角度をそのまま加算でき、主回転角も ${angleDeg.toFixed(1)}° に一致します。回転軸と平行な矢印は 0° で動かない点にも注目してください。`;
+        }
+        return;
+      }
+
+      if (Math.abs(state.angle1) === 90 && Math.abs(state.angle2) === 90 &&
+          ((state.axis1 === 'X' && state.axis2 === 'Y') || (state.axis1 === 'Y' && state.axis2 === 'X'))) {
+        const orderLabel = state.frame === 'fixed'
+          ? `固定軸で ${state.axis1}→${state.axis2}`
+          : `物体軸で ${state.axis1}→${state.axis2}`;
+        box.textContent =
+          `${orderLabel} の90°回転を2回行うと、操作角の和は180°ですが、軸が直交するため主回転角は 120.0° になります。黄色の斜め軸 n=(${fmt(axis[0], 2)}, ${fmt(axis[1], 2)}, ${fmt(axis[2], 2)}) まわりの1回転と同じ姿勢になることを「等価回転」モードで確認できます！`;
+        return;
+      }
+
+      const zeroVec = [xAng, yAng, zAng].some((a) => a < 0.5);
+      if (zeroVec) {
+        box.textContent =
+          `ある軸ベクトルは変化角 0° ですが、物体全体としては主回転角 ${angleDeg.toFixed(1)}° だけ回転しています。1本の矢印だけでは3次元の姿勢を判定できません。`;
+        return;
+      }
+
+      box.textContent =
+        `異なる軸の回転を合成すると、回転軸も斜めの n へ合成されます。操作角の和 (${opAbsSum.toFixed(1)}°) と、初期→最終を1回で結ぶ主回転角 (${angleDeg.toFixed(1)}°) は一般に一致しません。`;
+    }
+
+    /**
+     * ============================================================================
+     * 6. POSE INTERPOLATION & ANIMATION
+     * ============================================================================
+     */
+    function applyPoseAtProgress(t) {
+      const v1 = axisKeyToVec(state.axis1);
+      const v2 = axisKeyToVec(state.axis2);
+      let qCurrent = { w: 1, x: 0, y: 0, z: 0 };
+      const badge = document.getElementById('phase-badge');
+
+      if (state.playMode === 'steps') {
+        // 2-step operation path: 0..0.5 is Q1, 0.5..1.0 is Q2
+        if (t <= 0.5) {
+          const localT = t / 0.5;
+          const a1 = state.angle1 * localT;
+          qCurrent = quatFromAxisAngle(v1, a1);
+          badge.textContent = `【2段階再生】第1回転 Q₁ (${state.axis1}軸): ${a1.toFixed(1)}° / ${state.angle1}°`;
+          updateActiveAxisHighlight(v1, 0x38bdf8);
+        } else {
+          const localT = (t - 0.5) / 0.5;
+          const a2 = state.angle2 * localT;
+          const q2Part = quatFromAxisAngle(v2, a2);
+          if (state.frame === 'fixed') {
+            qCurrent = quatMul(q2Part, state.q1);
+            updateActiveAxisHighlight(v2, 0x10b981);
+            badge.textContent = `【2段階再生】第2回転 Q₂ (固定${state.axis2}軸): ${a2.toFixed(1)}° / ${state.angle2}°`;
+          } else {
+            qCurrent = quatMul(state.q1, q2Part);
+            const rotatedAxis2 = quatRotateVec(state.q1, v2);
+            updateActiveAxisHighlight(rotatedAxis2, 0xc084fc);
+            badge.textContent = `【2段階再生】第2回転 Q₂ (物体${state.axis2.toLowerCase()}'軸): ${a2.toFixed(1)}° / ${state.angle2}°`;
+          }
+        }
+      } else {
+        // Equivalent Single Rotation around composite axis n from 0 to θ_principal
+        const { angleDeg, axis, hasAxis } = state.principal;
+        if (hasAxis && angleDeg > 0.05) {
+          const curAng = angleDeg * t;
+          qCurrent = quatFromAxisAngle(axis, curAng);
+          badge.textContent = `【等価な単一回転】合成軸 n まわり: ${curAng.toFixed(1)}° / ${angleDeg.toFixed(1)}°`;
+          updateActiveAxisHighlight(axis, 0xfbbf24);
+        } else {
+          qCurrent = { w: 1, x: 0, y: 0, z: 0 };
+          badge.textContent = '【等価な単一回転】主回転角 0° (回転なし)';
+          updateActiveAxisHighlight(null, 0xfbbf24);
+        }
+      }
+
+      // Apply quaternion to Three.js mesh (Three.js uses x, y, z, w order)
+      objectGroup.quaternion.set(qCurrent.x, qCurrent.y, qCurrent.z, qCurrent.w);
+
+      // Sync slider display
+      document.getElementById('timeline-slider').value = (t * 100).toFixed(1);
+      document.getElementById('timeline-pct').textContent = `${Math.round(t * 100)}%`;
+    }
+
+    let lastFrameTime = 0;
+    function animate(now) {
+      requestAnimationFrame(animate);
+
+      if (state.isPlaying) {
+        const dt = lastFrameTime ? (now - lastFrameTime) / 1000 : 0.016;
+        // Total playback duration: 3.2s for 2-step, 2.2s for single rotation
+        const duration = state.playMode === 'steps' ? 3.2 : 2.2;
+        state.progress += dt / duration;
+        if (state.progress >= 1.0) {
+          state.progress = 1.0;
+          setPlaying(false);
+        }
+        applyPoseAtProgress(state.progress);
+      }
+      lastFrameTime = now;
+
+      renderer.render(scene, camera);
+    }
+
+    function setPlaying(flag) {
+      state.isPlaying = flag;
+      document.getElementById('play-icon').textContent = flag ? '⏸' : '▶';
+      document.getElementById('play-label').textContent = flag ? '一時停止' : '再生';
+    }
+
+    /**
+     * ============================================================================
+     * 7. UI EVENT BINDINGS & PRESETS
+     * ============================================================================
+     */
+    function syncControlButtons() {
+      // Axis buttons
+      document.querySelectorAll('.axis-btn-1').forEach((btn) => {
+        const active = btn.dataset.axis === state.axis1;
+        btn.className = `axis-btn-1 flex-1 py-1 rounded-lg text-xs font-bold transition ${
+          active ? 'bg-sky-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+        }`;
+      });
+      document.querySelectorAll('.axis-btn-2').forEach((btn) => {
+        const active = btn.dataset.axis === state.axis2;
+        btn.className = `axis-btn-2 flex-1 py-1 rounded-lg text-xs font-bold transition ${
+          active ? 'bg-emerald-600 text-white shadow' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+        }`;
+      });
+
+      // Sliders & labels
+      document.getElementById('q1-slider').value = state.angle1;
+      document.getElementById('q1-angle-val').textContent = `${state.angle1 >= 0 ? '+' : ''}${state.angle1}°`;
+      document.getElementById('q2-slider').value = state.angle2;
+      document.getElementById('q2-angle-val').textContent = `${state.angle2 >= 0 ? '+' : ''}${state.angle2}°`;
+
+      // Frame toggle
+      const isFixed = state.frame === 'fixed';
+      document.getElementById('frame-fixed').className = `py-1.5 rounded-lg text-xs font-semibold transition ${
+        isFixed ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+      }`;
+      document.getElementById('frame-local').className = `py-1.5 rounded-lg text-xs font-semibold transition ${
+        !isFixed ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+      }`;
+      document.getElementById('frame-formula').textContent = isFixed ? 'q = q₂ q₁ (左掛け)' : 'q = q₁ q₂ (右掛け)';
+
+      // Play mode toggle
+      const isSteps = state.playMode === 'steps';
+      document.getElementById('mode-steps').className = `px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
+        isSteps ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
+      }`;
+      document.getElementById('mode-single').className = `px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
+        !isSteps ? 'bg-amber-600 text-white shadow' : 'text-slate-400 hover:text-white'
+      }`;
+    }
+
+    function applyPreset(name) {
+      const presets = {
+        xy90:    { axis1: 'X', angle1: 90,  axis2: 'Y', angle2: 90,  frame: 'fixed' },
+        yx90:    { axis1: 'Y', angle1: 90,  axis2: 'X', angle2: 90,  frame: 'fixed' },
+        sameZ:   { axis1: 'Z', angle1: 30,  axis2: 'Z', angle2: 45,  frame: 'fixed' },
+        z270:    { axis1: 'Z', angle1: 180, axis2: 'Z', angle2: 90,  frame: 'fixed' },
+        cancelZ: { axis1: 'Z', angle1: 90,  axis2: 'Z', angle2: -90, frame: 'fixed' },
+        localXY: { axis1: 'X', angle1: 90,  axis2: 'Y', angle2: 90,  frame: 'local' }
+      };
+      const p = presets[name];
+      if (!p) return;
+
+      Object.assign(state, p);
+      state.progress = 0;
+      syncControlButtons();
+      recomputeMath();
+      setPlaying(true);
+
+      // Highlight selected preset card
+      document.querySelectorAll('.preset-btn').forEach((btn) => {
+        const sel = btn.dataset.preset === name;
+        btn.classList.toggle('border-sky-500/70', sel);
+        btn.classList.toggle('border-slate-700', !sel);
+      });
+    }
+
+    function bindEvents() {
+      // Presets
+      document.querySelectorAll('.preset-btn').forEach((btn) => {
+        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+      });
+
+      // Axis selection
+      document.querySelectorAll('.axis-btn-1').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.axis1 = btn.dataset.axis;
+          syncControlButtons();
+          recomputeMath();
+        });
+      });
+      document.querySelectorAll('.axis-btn-2').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.axis2 = btn.dataset.axis;
+          syncControlButtons();
+          recomputeMath();
+        });
+      });
+
+      // Angle sliders
+      document.getElementById('q1-slider').addEventListener('input', (e) => {
+        state.angle1 = parseFloat(e.target.value);
+        syncControlButtons();
+        recomputeMath();
+      });
+      document.getElementById('q2-slider').addEventListener('input', (e) => {
+        state.angle2 = parseFloat(e.target.value);
+        syncControlButtons();
+        recomputeMath();
+      });
+
+      // Swap Q1 <-> Q2 (Non-commutativity check)
+      document.getElementById('btn-swap').addEventListener('click', () => {
+        [state.axis1, state.axis2] = [state.axis2, state.axis1];
+        [state.angle1, state.angle2] = [state.angle2, state.angle1];
+        state.progress = 0;
+        syncControlButtons();
+        recomputeMath();
+        setPlaying(true);
+      });
+
+      // Frame mode
+      document.getElementById('frame-fixed').addEventListener('click', () => {
+        state.frame = 'fixed';
+        syncControlButtons();
+        recomputeMath();
+      });
+      document.getElementById('frame-local').addEventListener('click', () => {
+        state.frame = 'local';
+        syncControlButtons();
+        recomputeMath();
+      });
+
+      // Playback modes
+      document.getElementById('mode-steps').addEventListener('click', () => {
+        state.playMode = 'steps';
+        state.progress = 0;
+        syncControlButtons();
+        applyPoseAtProgress(0);
+        setPlaying(true);
+      });
+      document.getElementById('mode-single').addEventListener('click', () => {
+        state.playMode = 'single';
+        state.progress = 0;
+        syncControlButtons();
+        applyPoseAtProgress(0);
+        setPlaying(true);
+      });
+
+      // Play / Pause / Replay
+      document.getElementById('btn-play').addEventListener('click', () => {
+        if (!state.isPlaying && state.progress >= 0.999) {
+          state.progress = 0;
+        }
+        setPlaying(!state.isPlaying);
+      });
+      document.getElementById('btn-replay').addEventListener('click', () => {
+        state.progress = 0;
+        applyPoseAtProgress(0);
+        setPlaying(true);
+      });
+
+      // Timeline scrubber
+      document.getElementById('timeline-slider').addEventListener('input', (e) => {
+        setPlaying(false);
+        state.progress = parseFloat(e.target.value) / 100;
+        applyPoseAtProgress(state.progress);
+      });
+
+      // Camera reset
+      document.getElementById('btn-reset-cam').addEventListener('click', () => {
+        camOrbit.theta = Math.PI / 4;
+        camOrbit.phi = Math.PI / 3.2;
+        camOrbit.radius = 6.2;
+        updateCameraPosition();
+      });
+
+      // Ghost toggle
+      document.getElementById('btn-toggle-ghost').addEventListener('click', (e) => {
+        state.showGhost = !state.showGhost;
+        ghostGroup.visible = state.showGhost;
+        e.target.textContent = `初期姿勢枠: ${state.showGhost ? 'ON' : 'OFF'}`;
+      });
+
+      // Guided 3-step tour buttons
+      document.getElementById('tour-step1-steps').addEventListener('click', () => {
+        state.playMode = 'steps';
+        applyPreset('xy90');
+      });
+      document.getElementById('tour-step1-single').addEventListener('click', () => {
+        state.playMode = 'single';
+        applyPreset('xy90');
+      });
+      document.getElementById('tour-step2-xy').addEventListener('click', () => {
+        state.playMode = 'steps';
+        applyPreset('xy90');
+      });
+      document.getElementById('tour-step2-yx').addEventListener('click', () => {
+        state.playMode = 'steps';
+        applyPreset('yx90');
+      });
+      document.getElementById('tour-step3-samez').addEventListener('click', () => {
+        state.playMode = 'steps';
+        applyPreset('sameZ');
+      });
+
+      // Help modal open/close
+      const helpModal = document.getElementById('help-modal');
+      const openHelp = () => {
+        helpModal.classList.remove('hidden');
+        helpModal.classList.add('flex');
+      };
+      const closeHelp = () => {
+        helpModal.classList.add('hidden');
+        helpModal.classList.remove('flex');
+      };
+      document.getElementById('btn-help').addEventListener('click', openHelp);
+      document.getElementById('btn-close-help').addEventListener('click', closeHelp);
+      document.getElementById('btn-close-help-ok').addEventListener('click', closeHelp);
+      helpModal.addEventListener('click', (e) => {
+        if (e.target === helpModal) closeHelp();
+      });
+    }
+
+    // Initialize everything on window load
+    window.onload = function () {
+      try {
+        initThree();
+        bindEvents();
+        syncControlButtons();
+        recomputeMath();
+        // Start with a smooth initial animation of X90 -> Y90
+        state.progress = 0;
+        setPlaying(true);
+        requestAnimationFrame(animate);
+      } catch (err) {
+        console.error('Initialization error:', err);
+      }
+    };
+  </script>
+</body>
+</html>
